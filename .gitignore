@@ -12,3 +12,5 @@ __pycache__/
 # 로컬 시험 전용(브라우저 시험용 정적 파일, 내려받은 시험 사진)
 src/static/
 test_photos/
+# DATABASE_URL이 없을 때 쓰는 로컬 SQLite 파일
+data/

@@ -48,6 +48,11 @@ python api_test/test_api.py image    # 이미지 인식만
 - `vision.py`(1단계): 사진 축소(긴 변 1024px, JPEG), 프롬프트, JSON 추출, 이름 정리(한글과 영문이 섞여 깨진 이름 제거), 같은 이름·단위 병합을 담당합니다. 모델 순서는 `IMAGE_MODELS`에 있습니다.
 - `recipe.py`(2단계): 식재료와 조건(종류·난이도·조리 시간·인원)으로 프롬프트를 만들고, 응답을 정리합니다. 제목과 조리 순서의 80% 이상이 한글이 아니면 `ValueError`로 재시도시킵니다. `extract_json`은 `vision.py`의 것을 같이 씁니다. 레시피는 응답이 길어서 시간 제한이 120초입니다.
 - `app.py`: 단계(`st.session_state.step`) 단위의 마법사 화면입니다. 2단계에 들어오면 `recipes_pending` 플래그로 레시피 생성을 자동으로 시작합니다. 식재료 행은 고유 `_id`를 위젯 key로 써서 중간 행을 지워도 다른 행이 지워지지 않습니다. 실패하면 이전 결과를 먼저 지우고 실패를 `session_state`에 저장해서 다음 실행 때 그려 줍니다(`st.rerun()`으로 오류 문구가 사라지지 않게 하려는 것).
+- `db.py`(3단계): `DATABASE_URL`이 있으면 Supabase(Postgres, psycopg), 없으면 `data/app.db`(SQLite)를 씁니다. SQL은 `%s`로 쓰고 SQLite에서 `?`로 바꿉니다. Postgres 연결에는 Transaction pooler용 `prepare_threshold=None`, 잠든 앱이 깨어날 때를 대비한 `tcp_user_timeout`과 실행 전 `SELECT 1` 생존 확인이 들어 있습니다. 표를 만들 때 RLS를 켭니다. 시각은 UTC로 저장하고 `to_kst_text()`로 바꿔 보여 줍니다.
+  - 보안 결정: 구글 계정은 `google_sub`로만 찾고, 이메일이 같아도 비밀번호 계정과 합치지 않습니다(가입 시 이메일 인증이 없어서, 합치면 남이 미리 가입해 둔 계정으로 내 구글 계정에 들어올 수 있음). 그래서 구글 이메일은 `email`(UNIQUE)이 아니라 `google_email`에 둡니다.
+- `auth.py`: PBKDF2-SHA256 비밀번호 해시와 가입 입력 검사입니다.
+- `app.py`의 3단계 부분: `st.navigation`으로 레시피 찾기, 내 레시피, 프로필 페이지를 나눕니다. 사이드바는 페이지보다 먼저 그려지므로, 사용자 정보를 바꾼 뒤에는 `st.rerun()`으로 다시 그려야 합니다. `get_db()`는 `st.cache_resource`로 캐시되므로, `db.py`를 고친 뒤에는 앱 서버를 다시 시작해야 반영됩니다. 구글 로그인은 `st.secrets["auth"]["client_id"]`가 있을 때만 버튼이 보입니다.
+- 비밀 값 예시: `.env.example`(`OPENROUTER_API_KEY`, `DATABASE_URL`), `.streamlit/secrets.toml.example`(구글 로그인 `[auth]`).
 - 각 단계의 요구 사항은 `docs/PRD_step*.md`에 있습니다. 단계를 마칠 때마다 `screenshot/<태그>/`에 화면 캡처를 남기고, `PRD_01_01`처럼 태그를 붙여 커밋합니다.
 
 ### API 시험 코드(`api_test/`)

@@ -7,11 +7,64 @@ import uuid
 
 import streamlit as st
 
+import auth
+import db
 import recipe
 import vision
 from openrouter import AIError, AIResult, describe_error
+from settings import get_secret
 
 st.set_page_config(page_title="냉장고 레시피", page_icon="🥕", layout="wide")
+
+
+# ---------- 저장소와 로그인 ----------
+
+@st.cache_resource(show_spinner=False)
+def get_db() -> db.Database:
+    return db.Database(get_secret("DATABASE_URL"))
+
+
+def database() -> db.Database | None:
+    """DB를 열 수 없으면 None을 돌려주고, 저장 기능만 꺼집니다."""
+    try:
+        return get_db()
+    except Exception as e:
+        st.session_state.db_error = str(e)
+        return None
+
+
+def google_configured() -> bool:
+    try:
+        return bool(st.secrets.get("auth", {}).get("client_id"))
+    except Exception:
+        return False
+
+
+def current_user() -> dict | None:
+    if google_configured() and st.user.is_logged_in:
+        sub = st.user.get("sub")
+        cached = st.session_state.get("user")
+        if cached and cached.get("_google_sub") == sub:
+            return cached
+        store = database()
+        if store is None:
+            return None
+        user = store.google_user(sub, st.user.get("email", ""), st.user.get("name", ""))
+        st.session_state.user = {**user, "_google_sub": sub}
+    return st.session_state.get("user")
+
+
+def refresh_user() -> None:
+    user = st.session_state.get("user")
+    store = database()
+    if user and store:
+        st.session_state.user = {**store.get_user(user["id"]), "_google_sub": user.get("_google_sub")}
+
+
+def clear_session() -> None:
+    """로그아웃할 때 진행 상태(사진, 재료, 레시피)와 로그인 정보를 모두 지웁니다."""
+    reset_all()
+    st.session_state.pop("user", None)
 
 
 # ---------- 상태 ----------
@@ -34,7 +87,7 @@ def init_state() -> None:
         st.session_state.setdefault(key, value)
 
 
-STATE_PREFIXES = ("ing_", "step", "photo", "ingredients", "vision_", "recipe", "opt_")
+STATE_PREFIXES = ("ing_", "step", "photo", "ingredients", "vision_", "recipe", "opt_", "saved_")
 
 
 def reset_all() -> None:
@@ -212,7 +265,8 @@ OPTION_SPECS = [
 
 
 def default_options() -> dict:
-    return dict(recipe.DEFAULT_OPTIONS)
+    """로그인한 사용자는 프로필에 저장한 조건이 기본값이 됩니다."""
+    return {**recipe.DEFAULT_OPTIONS, **db.prefs_of(current_user())}
 
 
 def current_options() -> dict:
@@ -230,6 +284,7 @@ def run_generation() -> None:
     st.session_state.recipes = []
     st.session_state.recipe_result = None
     st.session_state.recipe_error = None
+    st.session_state.saved_titles = set()
     ingredients = [{k: v for k, v in i.items() if k != "_id"} for i in st.session_state.ingredients]
     with st.status("레시피를 만드는 중…", expanded=True) as status:
         try:
@@ -243,7 +298,36 @@ def run_generation() -> None:
         status.update(label=f"레시피 {len(result.data)}개 생성 완료", state="complete", expanded=False)
 
 
-def recipe_card(r: dict) -> None:
+def recipe_details(r: dict) -> None:
+    st.markdown("**재료**")
+    for i in r["used_ingredients"]:
+        st.write(f"- {i['name']} {i['amount']}")
+    for i in r["missing_ingredients"]:
+        st.write(f"- :red[{i['name']} {i['amount']} (부족)]")
+    st.markdown("**조리 순서**")
+    for n, s in enumerate(r["steps"], start=1):
+        st.write(f"{n}. {s}")
+    if r.get("tips"):
+        st.info(r["tips"])
+
+
+def save_button(r: dict, index: int) -> None:
+    user = current_user()
+    saved = st.session_state.setdefault("saved_titles", set())
+    store = database()
+    if user is None or store is None:
+        st.button("로그인하면 저장할 수 있어요", key=f"save_{index}", disabled=True, width="stretch")
+    elif r["title"] in saved:
+        st.button("저장됨 ✓", key=f"save_{index}", disabled=True, width="stretch")
+    elif st.button("레시피 저장", key=f"save_{index}", width="stretch"):
+        ingredients = [{k: v for k, v in i.items() if k != "_id"} for i in st.session_state.ingredients]
+        store.save_recipe(user["id"], r, ingredients)
+        saved.add(r["title"])
+        st.toast(f"'{r['title']}'을(를) 내 레시피에 저장했습니다.")
+        st.rerun()
+
+
+def recipe_card(r: dict, index: int) -> None:
     with st.container(border=True):
         # 요약 칸의 높이를 고정해서 카드마다 '자세히 보기' 위치를 맞춥니다.
         with st.container(height=280, border=False):
@@ -263,16 +347,8 @@ def recipe_card(r: dict) -> None:
             else:
                 st.markdown(":green[부족한 재료 없음]")
         with st.expander("자세히 보기"):
-            st.markdown("**재료**")
-            for i in r["used_ingredients"]:
-                st.write(f"- {i['name']} {i['amount']}")
-            for i in r["missing_ingredients"]:
-                st.write(f"- :red[{i['name']} {i['amount']} (부족)]")
-            st.markdown("**조리 순서**")
-            for n, s in enumerate(r["steps"], start=1):
-                st.write(f"{n}. {s}")
-            if r["tips"]:
-                st.info(r["tips"])
+            recipe_details(r)
+        save_button(r, index)
 
 
 def step_recipes() -> None:
@@ -298,9 +374,10 @@ def step_recipes() -> None:
         note = " (예비 모델이 대신 응답)" if result.used_fallback else ""
         st.caption(f"응답 모델: `{result.model}`{note}")
         show_attempts(result)
-        for col, r in zip(st.columns(len(st.session_state.recipes)), st.session_state.recipes):
+        recipes = st.session_state.recipes
+        for index, (col, r) in enumerate(zip(st.columns(len(recipes)), recipes)):
             with col:
-                recipe_card(r)
+                recipe_card(r, index)
 
 
 # ---------- 화면 ----------
@@ -315,13 +392,136 @@ def header() -> None:
     )
 
 
-def main() -> None:
+def login_forms(store: db.Database) -> None:
+    login_tab, signup_tab = st.tabs(["로그인", "회원가입"])
+    with login_tab, st.form("login_form", border=False):
+        email = st.text_input("이메일")
+        password = st.text_input("비밀번호", type="password")
+        if st.form_submit_button("로그인", width="stretch"):
+            user = store.login(email, password)
+            if user:
+                st.session_state.user = user
+                st.rerun()
+            st.error("이메일 또는 비밀번호가 맞지 않습니다.")
+    with signup_tab, st.form("signup_form", border=False):
+        email = st.text_input("이메일", key="signup_email")
+        password = st.text_input("비밀번호(8자 이상)", type="password", key="signup_pw")
+        password_again = st.text_input("비밀번호 확인", type="password", key="signup_pw2")
+        if st.form_submit_button("가입하기", width="stretch"):
+            problem = auth.validate_signup(email.strip(), password, password_again)
+            if problem:
+                st.error(problem)
+            else:
+                try:
+                    st.session_state.user = store.create_user(email, password)
+                    st.rerun()
+                except db.DuplicateEmail:
+                    st.error("이미 가입된 이메일입니다.")
+
+
+def sidebar() -> None:
+    with st.sidebar:
+        store = database()
+        if store is None:
+            st.error("저장소에 연결하지 못해 로그인과 저장 기능을 쓸 수 없습니다.")
+            st.caption(st.session_state.get("db_error", ""))
+            return
+        user = current_user()
+        if user:
+            st.success(f"**{user['display_name']}** 님")
+            st.caption(user.get("email") or user.get("google_email") or "")
+            if st.button("로그아웃", width="stretch"):
+                was_google = bool(user.get("_google_sub"))
+                clear_session()
+                if was_google:
+                    st.logout()
+                st.rerun()
+        else:
+            login_forms(store)
+            st.divider()
+            if google_configured():
+                if st.button("Google로 로그인", width="stretch"):
+                    st.login()
+            else:
+                st.caption("구글 로그인은 아직 설정되지 않았습니다.")
+        st.caption("저장소: " + ("Supabase(Postgres)" if store.kind == "postgres" else "로컬 SQLite(재부팅하면 지워질 수 있음)"))
+
+
+def page_recipes() -> None:
     init_state()
     header()
     if st.session_state.step == 1:
         step_photo()
     else:
         step_recipes()
+
+
+def require_login() -> tuple[dict, db.Database] | None:
+    user, store = current_user(), database()
+    if user is None or store is None:
+        st.info("왼쪽 사이드바에서 로그인하면 이용할 수 있습니다.")
+        return None
+    return user, store
+
+
+def page_saved() -> None:
+    st.title("📒 내 레시피")
+    session = require_login()
+    if session is None:
+        return
+    user, store = session
+    rows = store.list_recipes(user["id"])
+    if not rows:
+        st.info("아직 저장한 레시피가 없습니다. 레시피 찾기에서 마음에 드는 레시피를 저장해 보세요.")
+        return
+    st.caption(f"{len(rows)}개")
+    for row in rows:
+        r = row["recipe"]
+        with st.expander(f"{row['title']} · {row['created_at']} 저장"):
+            if r.get("summary"):
+                st.caption(r["summary"])
+            st.write("그때 냉장고 재료: " + ", ".join(i["name"] for i in row["ingredients"]))
+            recipe_details(r)
+            if st.button("삭제", key=f"del_saved_{row['id']}"):
+                store.delete_recipe(user["id"], row["id"])
+                st.rerun()
+
+
+def page_profile() -> None:
+    st.title("👤 프로필")
+    session = require_login()
+    if session is None:
+        return
+    user, store = session
+    prefs = {**recipe.DEFAULT_OPTIONS, **db.prefs_of(user)}
+    with st.form("profile_form"):
+        name = st.text_input("표시 이름", value=user["display_name"])
+        st.markdown("**레시피 추천 기본 조건**")
+        chosen = {}
+        for col, (key, label, choices) in zip(st.columns(len(OPTION_SPECS)), OPTION_SPECS):
+            chosen[key] = col.selectbox(label, choices, index=choices.index(prefs[key]))
+        if st.form_submit_button("저장", type="primary"):
+            store.update_profile(user["id"], name.strip() or user["display_name"], chosen)
+            refresh_user()
+            # 다음에 레시피 화면을 열 때 새 기본값이 적용되도록 조건 위젯 상태를 지웁니다.
+            for key, _, _ in OPTION_SPECS:
+                st.session_state.pop(f"opt_{key}", None)
+            # 사이드바는 페이지보다 먼저 그려지므로, 바뀐 이름이 보이도록 한 번 더 그립니다.
+            st.session_state.profile_saved = True
+            st.rerun()
+    if st.session_state.pop("profile_saved", False):
+        st.success("프로필을 저장했습니다. 레시피 추천 조건의 기본값으로 쓰입니다.")
+
+
+def main() -> None:
+    pages = [
+        st.Page(page_recipes, title="레시피 찾기", icon="🥕", url_path="recipes", default=True),
+        st.Page(page_saved, title="내 레시피", icon="📒", url_path="saved"),
+        st.Page(page_profile, title="프로필", icon="👤", url_path="profile"),
+    ]
+    navigation = st.navigation(pages)
+    sidebar()
+    navigation.run()
 
 
 main()
