@@ -32,7 +32,7 @@ def fake_chat(script):
     """모델별로 미리 정한 결과(예외 또는 응답)를 차례로 돌려주는 가짜 chat_once."""
     calls = []
 
-    def chat(model, messages):
+    def chat(model, messages, timeout=None):
         calls.append(model)
         outcome = script[model].pop(0)
         if isinstance(outcome, Exception):

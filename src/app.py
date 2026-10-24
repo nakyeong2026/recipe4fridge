@@ -7,6 +7,7 @@ import uuid
 
 import streamlit as st
 
+import recipe
 import vision
 from openrouter import AIError, AIResult, describe_error
 
@@ -23,17 +24,24 @@ def init_state() -> None:
         "ingredients": [],  # [{"_id", "name", "quantity", "unit", "category"}]
         "vision_result": None,  # 성공한 인식의 모델·시도 정보
         "vision_error": None,
+        "recipes": [],
+        "recipe_result": None,
+        "recipe_error": None,
+        "recipes_pending": False,  # 2단계에 들어오면 자동으로 생성
         "uploader_nonce": 0,
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
 
+STATE_PREFIXES = ("ing_", "step", "photo", "ingredients", "vision_", "recipe", "opt_")
+
+
 def reset_all() -> None:
     """사진 올리기부터 다시 시작합니다(위젯 상태까지 지움)."""
     nonce = st.session_state.get("uploader_nonce", 0) + 1
     for key in list(st.session_state.keys()):
-        if key.startswith(("ing_", "step", "photo", "ingredients", "vision_")):
+        if key.startswith(STATE_PREFIXES):
             del st.session_state[key]
     st.session_state.uploader_nonce = nonce
 
@@ -109,6 +117,10 @@ def add_ingredient() -> None:
 
 def go_to_recipes() -> None:
     st.session_state.ingredients = with_ids(collect_ingredients())
+    st.session_state.recipes = []
+    st.session_state.recipe_result = None
+    st.session_state.recipe_error = None
+    st.session_state.recipes_pending = True
     st.session_state.step = 2
 
 
@@ -189,6 +201,108 @@ def step_photo() -> None:
             )
 
 
+# ---------- 2단계: 레시피 ----------
+
+OPTION_SPECS = [
+    ("cuisine", "종류", recipe.CUISINE_OPTIONS),
+    ("difficulty", "난이도", recipe.DIFFICULTY_OPTIONS),
+    ("time", "조리 시간", recipe.TIME_OPTIONS),
+    ("servings", "인원", recipe.SERVINGS_OPTIONS),
+]
+
+
+def default_options() -> dict:
+    return dict(recipe.DEFAULT_OPTIONS)
+
+
+def current_options() -> dict:
+    return {key: st.session_state[f"opt_{key}"] for key, _, _ in OPTION_SPECS}
+
+
+def option_widgets() -> None:
+    defaults = default_options()
+    for col, (key, label, choices) in zip(st.columns(len(OPTION_SPECS)), OPTION_SPECS):
+        st.session_state.setdefault(f"opt_{key}", defaults[key])
+        col.selectbox(label, choices, key=f"opt_{key}")
+
+
+def run_generation() -> None:
+    st.session_state.recipes = []
+    st.session_state.recipe_result = None
+    st.session_state.recipe_error = None
+    ingredients = [{k: v for k, v in i.items() if k != "_id"} for i in st.session_state.ingredients]
+    with st.status("레시피를 만드는 중…", expanded=True) as status:
+        try:
+            result = recipe.generate(ingredients, current_options(), on_status=status.write)
+        except AIError as e:
+            st.session_state.recipe_error = e
+            status.update(label="레시피 생성 실패", state="error")
+            return
+        st.session_state.recipes = result.data
+        st.session_state.recipe_result = result
+        status.update(label=f"레시피 {len(result.data)}개 생성 완료", state="complete", expanded=False)
+
+
+def recipe_card(r: dict) -> None:
+    with st.container(border=True):
+        # 요약 칸의 높이를 고정해서 카드마다 '자세히 보기' 위치를 맞춥니다.
+        with st.container(height=280, border=False):
+            st.markdown(f"#### {r['title']}")
+            if r["summary"]:
+                st.caption(r["summary"])
+            meta = [f"⏱ {r['time_minutes']}분" if r["time_minutes"] else "", r["difficulty"],
+                    f"{r['servings']}인분" if r["servings"] else ""]
+            st.write(" · ".join(m for m in meta if m))
+            if r["used_ingredients"]:
+                st.markdown("**있는 재료** " + ", ".join(i["name"] for i in r["used_ingredients"]))
+            if r["missing_ingredients"]:
+                st.markdown(
+                    ":red[**부족한 재료**] "
+                    + ", ".join(f"{i['name']} {i['amount']}".strip() for i in r["missing_ingredients"])
+                )
+            else:
+                st.markdown(":green[부족한 재료 없음]")
+        with st.expander("자세히 보기"):
+            st.markdown("**재료**")
+            for i in r["used_ingredients"]:
+                st.write(f"- {i['name']} {i['amount']}")
+            for i in r["missing_ingredients"]:
+                st.write(f"- :red[{i['name']} {i['amount']} (부족)]")
+            st.markdown("**조리 순서**")
+            for n, s in enumerate(r["steps"], start=1):
+                st.write(f"{n}. {s}")
+            if r["tips"]:
+                st.info(r["tips"])
+
+
+def step_recipes() -> None:
+    with st.container(horizontal=True):
+        for i in st.session_state.ingredients:
+            st.badge(f"{i['name']} {i['quantity']}{i['unit']}", color="gray")
+    option_widgets()
+    back, again = st.columns(2)
+    back.button("← 이전(식재료 수정)", on_click=lambda: st.session_state.update(step=1), width="stretch")
+    regenerate = again.button("이 조건으로 다시 추천받기", type="primary", width="stretch")
+
+    if st.session_state.recipes_pending or regenerate:
+        st.session_state.recipes_pending = False
+        run_generation()
+
+    error = st.session_state.recipe_error
+    result = st.session_state.recipe_result
+    if error:
+        st.error(f"**레시피 생성 실패** — {describe_error(error)}")
+        show_attempts(None, error)
+        return
+    if result:
+        note = " (예비 모델이 대신 응답)" if result.used_fallback else ""
+        st.caption(f"응답 모델: `{result.model}`{note}")
+        show_attempts(result)
+        for col, r in zip(st.columns(len(st.session_state.recipes)), st.session_state.recipes):
+            with col:
+                recipe_card(r)
+
+
 # ---------- 화면 ----------
 
 def header() -> None:
@@ -207,8 +321,7 @@ def main() -> None:
     if st.session_state.step == 1:
         step_photo()
     else:
-        st.info("2단계(레시피 추천)는 아직 구현 전입니다.")
-        st.button("← 이전", on_click=lambda: st.session_state.update(step=1))
+        step_recipes()
 
 
 main()

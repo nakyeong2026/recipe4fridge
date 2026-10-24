@@ -135,6 +135,7 @@ def call_with_fallback(
     on_status: Callable[[str], None] = lambda _: None,
     primary_attempts: int = 3,
     fallback_attempts: int = 1,
+    timeout: int = REQUEST_TIMEOUT,
 ) -> AIResult:
     """1순위 모델을 최대 primary_attempts번 시도하고, 실패하면 예비 모델로 넘어갑니다.
 
@@ -147,7 +148,7 @@ def call_with_fallback(
         for number in range(1, tries + 1):
             on_status(f"{label} {number}차 시도: {model}")
             try:
-                content, actual = chat_once(model, messages)
+                content, actual = chat_once(model, messages, timeout=timeout)
                 data = parse(content)
             except AIError as e:
                 attempts.append(Attempt(model, number, False, e.message))
