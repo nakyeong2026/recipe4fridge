@@ -65,6 +65,13 @@ python api_test/test_api.py image    # 이미지 인식만
   - 폴백을 강제로 검증하려면 1순위를 다운된 모델로 임시 지정합니다(`api_test/`에서 실행): `python -c "import test_api as t; t.IMAGE_MODEL='nvidia/nemotron-3-super-120b-a12b:free'; t.test_image()"`
 - `api_test/sample.png`: 정답을 미리 아는 테스트 이미지입니다(빨간 원, 파란 사각형, 초록 삼각형, 글자 "HELLO 2026"). 파일이 없으면 `make_sample_image()`가 다시 만듭니다. 그림을 바꾸면 이미지 테스트의 정답도 같이 바뀝니다.
 
+## 배포
+
+- 배포 앱: https://recipe4fridge-rmvcfl7qjnzc4tu6xs63kw.streamlit.app (Streamlit Community Cloud, 저장소 `nakyeong2026/recipe4fridge`의 `main`, 앱 파일 `src/app.py`)
+- `main`에 푸시하면 배포 앱에 자동으로 반영됩니다. 깃허브의 코드가 맞는데도 배포 앱만 ImportError 같은 오류를 내면, 대시보드의 ⋮ → Reboot app으로 다시 시작해 봅니다.
+- 배포 앱의 비밀 값은 대시보드의 Settings → Secrets에 있습니다. 최상위 키(`OPENROUTER_API_KEY`, `DATABASE_URL`)를 먼저 쓰고 `[auth]` 블록을 맨 뒤에 둡니다.
+- 배포 앱은 내장 브라우저에서 바깥 페이지 안의 iframe(같은 출처)으로 열리므로, 자동 조작은 `document.querySelector('iframe').contentDocument`에서 합니다. 시험 사진은 raw.githubusercontent.com에서 fetch해 업로드 칸에 넣을 수 있습니다.
+
 ## 실행 시 확인 사항
 
 OpenRouter API를 이용해서 실제 AI 모델이 냉장고 사진 이미지를 인식하고 레시피를 생성하게 한다. 앱을 실행해 시험할 때마다 API가 정확하게 작동했는지, AI 모델이 문제 없이 실행되었는지(응답한 모델, 몇 차 시도, 예비 모델 전환 여부)를 확인하고, 문제가 있었다면 어떤 문제였는지 보고한다.
