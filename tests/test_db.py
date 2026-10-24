@@ -71,3 +71,13 @@ def test_to_kst_text():
 
     assert db.to_kst_text("2026-10-24 17:11:05") == "2026-10-25 02:11"
     assert db.to_kst_text(datetime(2026, 10, 24, 17, 11, tzinfo=timezone.utc)) == "2026-10-25 02:11"
+
+
+def test_model_selection_and_migration_on_existing_table(tmp_path):
+    path = tmp_path / "old.db"
+    first = db.Database(sqlite_path=path)
+    user = first.create_user("m@example.com", "password123")
+    assert db.models_of(user) == ([], [])
+    second = db.Database(sqlite_path=path)  # 이미 열이 있어도 다시 열 수 있어야 함
+    second.update_models(user["id"], ["v/a:free"], ["t/b:free", "t/c:free"])
+    assert db.models_of(second.get_user(user["id"])) == (["v/a:free"], ["t/b:free", "t/c:free"])

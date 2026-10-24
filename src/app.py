@@ -9,6 +9,7 @@ import streamlit as st
 
 import auth
 import db
+import models
 import recipe
 import vision
 from openrouter import AIError, AIResult, describe_error
@@ -68,6 +69,20 @@ def refresh_user() -> None:
     store = database()
     if user and store:
         st.session_state.user = {**store.get_user(user["id"]), "_google_sub": user.get("_google_sub")}
+
+
+def model_chains() -> tuple[list[str], list[str]]:
+    """로그인한 사용자가 프로필에서 고른 모델로 (이미지, 텍스트) 시도 순서를 만듭니다."""
+    vision_selected, text_selected = db.models_of(current_user())
+    return (
+        models.build_chain(vision_selected, vision.IMAGE_MODELS),
+        models.build_chain(text_selected, recipe.TEXT_MODELS),
+    )
+
+
+@st.cache_data(ttl=3600, show_spinner="무료 모델 목록을 불러오는 중…")
+def free_models() -> list[dict]:
+    return models.fetch_free_models()
 
 
 def clear_session() -> None:
@@ -132,7 +147,7 @@ def run_recognition() -> None:
     st.session_state.vision_error = None
     with st.status("식재료를 인식하는 중…", expanded=True) as status:
         try:
-            result = vision.recognize(jpeg, on_status=status.write)
+            result = vision.recognize(jpeg, on_status=status.write, models=model_chains()[0])
         except AIError as e:
             st.session_state.vision_error = e
             status.update(label="식재료 인식 실패", state="error")
@@ -297,7 +312,9 @@ def run_generation() -> None:
     ingredients = [{k: v for k, v in i.items() if k != "_id"} for i in st.session_state.ingredients]
     with st.status("레시피를 만드는 중…", expanded=True) as status:
         try:
-            result = recipe.generate(ingredients, current_options(), on_status=status.write)
+            result = recipe.generate(
+                ingredients, current_options(), on_status=status.write, models=model_chains()[1]
+            )
         except AIError as e:
             st.session_state.recipe_error = e
             status.update(label="레시피 생성 실패", state="error")
@@ -520,6 +537,56 @@ def page_profile() -> None:
             st.rerun()
     if st.session_state.pop("profile_saved", False):
         st.success("프로필을 저장했습니다. 레시피 추천 조건의 기본값으로 쓰입니다.")
+    model_selection(user, store)
+
+
+def model_table(title: str, rows: list[dict], selected: list[str], defaults: list[str], key: str) -> list[str]:
+    """무료 모델 표에서 체크한 모델 id 목록을 돌려줍니다."""
+    import pandas as pd
+
+    checked = set(selected or defaults)
+    frame = pd.DataFrame(
+        [{"사용": r["id"] in checked, "모델 ID": r["id"], "이름": r["name"],
+          "컨텍스트": f"{r['context']:,}", "출시일": r["created"]} for r in rows]
+    )
+    st.markdown(f"**{title}**")
+    edited = st.data_editor(
+        frame, key=key, hide_index=True, width="stretch",
+        disabled=["모델 ID", "이름", "컨텍스트", "출시일"],
+        column_config={"사용": st.column_config.CheckboxColumn(width="small")},
+    )
+    return edited.loc[edited["사용"], "모델 ID"].tolist()
+
+
+def model_selection(user: dict, store: db.Database) -> None:
+    st.divider()
+    st.subheader("AI 모델 선택")
+    st.caption(
+        "OpenRouter에서 입력·출력 가격이 모두 $0인 무료 모델만 보여 줍니다. "
+        f"체크한 모델을 수업 지정 모델 → 나머지 순서로 최대 {models.MAX_CHAIN}개까지 차례로 시도하고, "
+        "하나도 고르지 않으면 기본 순서를 씁니다. 같은 무료 모델이라도 계정이나 시점에 따라 403·404로 거절될 수 있습니다."
+    )
+    try:
+        rows = free_models()
+    except Exception as e:
+        st.warning(f"무료 모델 목록을 불러오지 못했습니다: {e}")
+        return
+    vision_selected, text_selected = db.models_of(user)
+    with st.form("model_form"):
+        chosen_vision = model_table(
+            "식재료 인식(이미지 입력 가능 모델)", [r for r in rows if r["vision"]],
+            vision_selected, vision.IMAGE_MODELS, "vision_table",
+        )
+        chosen_text = model_table("레시피 생성", rows, text_selected, recipe.TEXT_MODELS, "text_table")
+        if st.form_submit_button("모델 선택 저장", type="primary"):
+            store.update_models(user["id"], chosen_vision, chosen_text)
+            refresh_user()
+            st.session_state.models_saved = True
+            st.rerun()
+    if st.session_state.pop("models_saved", False):
+        st.success("모델 선택을 저장했습니다.")
+    vision_chain, text_chain = model_chains()
+    st.caption("지금 시도 순서 — 인식: " + " → ".join(vision_chain) + " / 레시피: " + " → ".join(text_chain))
 
 
 def main() -> None:

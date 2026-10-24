@@ -136,5 +136,7 @@ def merge_duplicates(items: list[dict]) -> list[dict]:
     return list(merged.values())
 
 
-def recognize(jpeg: bytes, on_status: Callable[[str], None] = lambda _: None) -> AIResult:
-    return call_with_fallback(IMAGE_MODELS, build_messages(jpeg), parse_ingredients, on_status)
+def recognize(
+    jpeg: bytes, on_status: Callable[[str], None] = lambda _: None, models: list[str] | None = None
+) -> AIResult:
+    return call_with_fallback(models or IMAGE_MODELS, build_messages(jpeg), parse_ingredients, on_status)

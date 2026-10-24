@@ -68,7 +68,16 @@ SCHEMA = {
     ],
 }
 
-USER_COLUMNS = "id, email, google_email, display_name, pref_cuisine, pref_difficulty, pref_time, pref_servings"
+# 나중에 더한 열. 이미 있는 표에도 적용되도록 따로 실행합니다(이미 있으면 무시).
+MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN vision_models TEXT",
+    "ALTER TABLE users ADD COLUMN text_models TEXT",
+]
+
+USER_COLUMNS = (
+    "id, email, google_email, display_name, pref_cuisine, pref_difficulty, pref_time, pref_servings, "
+    "vision_models, text_models"
+)
 
 
 class DuplicateEmail(Exception):
@@ -85,6 +94,13 @@ class Database:
         with self._lock:
             for sql in SCHEMA[self.kind]:
                 self._execute(sql)
+            for sql in MIGRATIONS:
+                if self.kind == "postgres":
+                    sql = sql.replace("ADD COLUMN", "ADD COLUMN IF NOT EXISTS")
+                try:
+                    self._execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # SQLite: 이미 있는 열
 
     # ---------- 연결 ----------
 
@@ -182,6 +198,12 @@ class Database:
             (display_name, *(prefs.get(k) for k in PREF_KEYS), user_id),
         )
 
+    def update_models(self, user_id: int, vision_models: list[str], text_models: list[str]) -> None:
+        self._query(
+            "UPDATE users SET vision_models = %s, text_models = %s WHERE id = %s",
+            (json.dumps(vision_models), json.dumps(text_models), user_id),
+        )
+
     # ---------- 레시피 ----------
 
     def save_recipe(self, user_id: int, recipe: dict, ingredients: list[dict]) -> int:
@@ -216,3 +238,10 @@ def prefs_of(user: dict | None) -> dict:
     if not user:
         return {}
     return {k: user[f"pref_{k}"] for k in PREF_KEYS if user.get(f"pref_{k}")}
+
+
+def models_of(user: dict | None) -> tuple[list[str], list[str]]:
+    """사용자가 고른 (이미지 모델, 텍스트 모델) 목록. 고르지 않았으면 빈 목록입니다."""
+    if not user:
+        return [], []
+    return tuple(json.loads(user.get(k) or "[]") for k in ("vision_models", "text_models"))

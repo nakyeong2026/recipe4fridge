@@ -110,10 +110,13 @@ def parse_recipes(text: str) -> list[dict]:
 
 
 def generate(
-    ingredients: list[dict], options: dict, on_status: Callable[[str], None] = lambda _: None
+    ingredients: list[dict],
+    options: dict,
+    on_status: Callable[[str], None] = lambda _: None,
+    models: list[str] | None = None,
 ) -> AIResult:
     return call_with_fallback(
-        TEXT_MODELS, build_messages(ingredients, options), parse_recipes, on_status, timeout=TIMEOUT
+        models or TEXT_MODELS, build_messages(ingredients, options), parse_recipes, on_status, timeout=TIMEOUT
     )
 
 
