@@ -30,14 +30,15 @@ st.html(
 # ---------- 저장소와 로그인 ----------
 
 @st.cache_resource(show_spinner=False)
-def get_db() -> db.Database:
-    return db.Database(get_secret("DATABASE_URL"))
+def get_db(url: str | None) -> db.Database:
+    # 연결 문자열을 캐시 키로 써서, Secrets의 DATABASE_URL이 바뀌면 재부팅 없이 새로 연결합니다.
+    return db.Database(url)
 
 
 def database() -> db.Database | None:
     """DB를 열 수 없으면 None을 돌려주고, 저장 기능만 꺼집니다."""
     try:
-        return get_db()
+        return get_db(get_secret("DATABASE_URL"))
     except Exception as e:
         st.session_state.db_error = str(e)
         return None

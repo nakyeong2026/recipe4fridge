@@ -52,7 +52,7 @@ python api_test/test_api.py image    # 이미지 인식만
   - 보안 결정: 구글 계정은 `google_sub`로만 찾고, 이메일이 같아도 비밀번호 계정과 합치지 않습니다(가입 시 이메일 인증이 없어서, 합치면 남이 미리 가입해 둔 계정으로 내 구글 계정에 들어올 수 있음). 그래서 구글 이메일은 `email`(UNIQUE)이 아니라 `google_email`에 둡니다.
 - `auth.py`: PBKDF2-SHA256 비밀번호 해시와 가입 입력 검사입니다.
 - `models.py`: OpenRouter `/api/v1/models`에서 입력·출력 가격이 모두 0인 모델을 골라 프로필의 모델 선택 표에 씁니다. `build_chain()`은 사용자가 체크한 모델 중 기본 순서(`IMAGE_MODELS`, `TEXT_MODELS`)에 있는 것을 먼저 두고, 하루 50회 한도를 생각해 최대 4개로 자릅니다. 선택은 `users.vision_models`·`text_models`(JSON)에 저장되고, 이 열은 `db.MIGRATIONS`로 기존 표에도 추가됩니다. 공식 API에는 주간 토큰·지연 시간 같은 지표가 없어 표에 넣지 않았습니다.
-- `app.py`의 3단계 부분: `st.navigation`으로 레시피 찾기, 내 레시피, 프로필 페이지를 나눕니다. 사이드바는 페이지보다 먼저 그려지므로, 사용자 정보를 바꾼 뒤에는 `st.rerun()`으로 다시 그려야 합니다. `get_db()`는 `st.cache_resource`로 캐시되므로, `db.py`를 고친 뒤에는 앱 서버를 다시 시작해야 반영됩니다. 구글 로그인은 `st.secrets["auth"]["client_id"]`가 있을 때만 버튼이 보입니다.
+- `app.py`의 3단계 부분: `st.navigation`으로 레시피 찾기, 내 레시피, 프로필 페이지를 나눕니다. 사이드바는 페이지보다 먼저 그려지므로, 사용자 정보를 바꾼 뒤에는 `st.rerun()`으로 다시 그려야 합니다. `get_db(url)`은 연결 문자열을 키로 `st.cache_resource`에 캐시합니다. Secrets의 `DATABASE_URL`을 바꾸면 새로 연결되지만, `db.py` 코드를 고친 뒤에는 앱 서버를 다시 시작해야 반영됩니다. 구글 로그인은 `st.secrets["auth"]["client_id"]`가 있을 때만 버튼이 보입니다.
 - 비밀 값 예시: `.env.example`(`OPENROUTER_API_KEY`, `DATABASE_URL`), `.streamlit/secrets.toml.example`(구글 로그인 `[auth]`).
 - 각 단계의 요구 사항은 `docs/PRD_step*.md`에 있습니다. 단계를 마칠 때마다 `screenshot/<태그>/`에 화면 캡처를 남기고, `PRD_01_01`처럼 태그를 붙여 커밋합니다.
 
