@@ -1,0 +1,10 @@
+# 비밀 값이 들어 있는 환경 변수 파일은 절대 커밋하지 않습니다.
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
