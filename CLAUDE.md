@@ -10,7 +10,7 @@ OpenRouter API로 냉장고 사진에서 식재료를 인식하고 레시피를 
 - `api_test/`: 앱 구현 전에 두 모델의 API 연결을 시험한 코드입니다.
 
 - Python 3.12. HTTP 요청은 표준 라이브러리 `urllib`만 사용합니다(`requests`, `python-dotenv`는 설치되어 있지 않음).
-- 외부 패키지는 테스트 이미지를 만들 때 쓰는 Pillow 하나뿐입니다. 의존성 파일(requirements 등)은 아직 없습니다.
+- 앱 의존성은 `requirements.txt`에 있습니다. 구글 로그인(`st.login`)에는 Authlib와 httpx가 필요해서 `streamlit[auth]`로 설치합니다(httpx가 없으면 로그인 버튼을 누를 때 Internal Server Error).
 
 ## 명령어
 
