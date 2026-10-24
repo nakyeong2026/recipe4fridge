@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "recipe-app",
+      "runtimeExecutable": ".venv/Scripts/python.exe",
+      "runtimeArgs": ["-m", "streamlit", "run", "src/app.py", "--server.port", "8501", "--server.headless", "true", "--server.enableStaticServing", "true", "--browser.gatherUsageStats", "false"],
+      "port": 8501
+    }
+  ]
+}

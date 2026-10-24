@@ -8,3 +8,7 @@
 __pycache__/
 *.pyc
 .venv/
+
+# 로컬 시험 전용(브라우저 시험용 정적 파일, 내려받은 시험 사진)
+src/static/
+test_photos/

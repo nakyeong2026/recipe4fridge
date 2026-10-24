@@ -14,6 +14,18 @@ OpenRouter API로 냉장고 사진에서 식재료를 인식하고 레시피를 
 
 ## 명령어
 
+앱과 시험은 프로젝트의 가상 환경(`.venv`)으로 실행합니다. 배포 환경(Streamlit Community Cloud)은 `requirements.txt`를 읽습니다.
+
+```bash
+.venv/Scripts/python -m streamlit run src/app.py        # 앱 실행 (http://localhost:8501)
+.venv/Scripts/python -m pytest -q                       # 자동 시험 전체 (pytest.ini가 src를 import 경로에 넣음)
+.venv/Scripts/python -m pytest tests/test_vision.py -k merge   # 시험 하나만
+```
+
+내장 브라우저로 앱을 시험할 때는 `.claude/launch.json`의 `recipe-app` 설정으로 띄웁니다. 이 설정은 정적 파일 제공을 켜 두므로, `src/static/`(git 제외)에 둔 시험 사진을 `/app/static/파일명`에서 fetch해서 DataTransfer로 업로드 칸에 넣을 수 있습니다. 시험 사진 원본은 `test_photos/`(git 제외)에 있습니다. 무료 호출은 하루 50회이므로 실제 AI 호출 시험은 아껴 씁니다.
+
+API 연결만 따로 시험하는 스크립트:
+
 ```bash
 python api_test/test_api.py          # 텍스트·이미지 테스트 모두 실행
 python api_test/test_api.py text     # 텍스트 인식만
@@ -24,6 +36,20 @@ python api_test/test_api.py image    # 이미지 인식만
 
 ## 구조
 
+### 앱(`src/`)
+화면 코드와 AI 호출 로직을 분리해, 로직은 화면 없이 pytest로 시험합니다. Streamlit은 실행한 스크립트의 폴더(`src/`)를 import 경로에 넣으므로 모듈끼리 `import vision`처럼 가져옵니다.
+
+- `settings.py`: `get_secret()`이 환경 변수 → 루트 `.env` → `st.secrets` 순서로 값을 찾습니다. 로컬과 배포 환경에서 같은 코드가 동작하게 하는 지점입니다.
+- `openrouter.py`: 모든 AI 호출이 지나가는 곳입니다.
+  - `call_with_fallback()`은 1순위 모델을 최대 3번(2초, 4초 대기) 시도한 뒤 예비 모델로 넘어갑니다. 서버 쪽 `models` 폴백이 아니라 앱이 직접 순서대로 호출하는 방식이라서, 시도마다 `on_status`로 진행 상황을 화면에 보여 줄 수 있습니다.
+  - 오류는 `AIError.kind`로 나뉩니다. `daily_limit`·`auth`·`config`는 바로 멈추고(무료 일일 한도는 모든 무료 모델이 함께 쓰므로 다른 모델로 바꿔도 소용없음), `not_found`·`forbidden`·`bad_request`·`timeout`은 같은 모델을 다시 시도하지 않고 다음 모델로 넘어갑니다.
+  - `parse`가 `ValueError`를 내면(빈 응답, 깨진 JSON) 실패로 보고 다시 시도합니다.
+  - OpenRouter는 처리 중에 연결 유지용 공백을 보내서 소켓 timeout이 끝나지 않으므로, `chat_once()`가 `read1()`로 조금씩 읽으면서 전체 경과 시간(60초)으로 끊습니다.
+- `vision.py`(1단계): 사진 축소(긴 변 1024px, JPEG), 프롬프트, JSON 추출, 이름 정리(한글과 영문이 섞여 깨진 이름 제거), 같은 이름·단위 병합을 담당합니다. 모델 순서는 `IMAGE_MODELS`에 있습니다.
+- `app.py`: 단계(`st.session_state.step`) 단위의 마법사 화면입니다. 식재료 행은 고유 `_id`를 위젯 key로 써서 중간 행을 지워도 다른 행이 지워지지 않습니다. 실패하면 이전 결과를 먼저 지우고 실패를 `session_state`에 저장해서 다음 실행 때 그려 줍니다(`st.rerun()`으로 오류 문구가 사라지지 않게 하려는 것).
+- 각 단계의 요구 사항은 `docs/PRD_step*.md`에 있습니다. 단계를 마칠 때마다 `screenshot/<태그>/`에 화면 캡처를 남기고, `PRD_01_01`처럼 태그를 붙여 커밋합니다.
+
+### API 시험 코드(`api_test/`)
 - `api_test/config.py`: 프로젝트 루트의 `.env`를 직접 파싱해서 `os.environ.setdefault`로 채웁니다. 시스템 환경 변수에 이미 있는 값이 `.env`보다 우선합니다. API 키는 항상 `get_openrouter_key()`로 가져오고, 로그에 남겨야 하면 `mask()`를 씁니다.
 - `api_test/test_api.py`: 공통 요청 함수 `chat()`가 OpenRouter `/api/v1/chat/completions`를 호출합니다. 429와 5xx 오류는 10초, 20초, 40초 간격으로 재시도하고, 404 같은 그 밖의 오류는 바로 `RuntimeError`로 올립니다. 모델 ID는 파일 위쪽 상수에 있습니다.
   - 텍스트 모델 `TEXT_MODEL` = `nvidia/nemotron-3-super-120b-a12b:free`, 대체 모델은 `TEXT_FALLBACKS`.
