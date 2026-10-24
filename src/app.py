@@ -16,6 +16,15 @@ from settings import get_secret
 
 st.set_page_config(page_title="냉장고 레시피", page_icon="🥕", layout="wide")
 
+# 버튼과 수량 +/- 버튼을 권장 터치 크기(44px) 이상으로 키웁니다.
+st.html(
+    """<style>
+    .stButton button, .stFormSubmitButton button { min-height: 44px; }
+    [data-testid="stNumberInputStepDown"], [data-testid="stNumberInputStepUp"] { min-width: 44px; }
+    [data-testid="stNumberInputContainer"], [data-baseweb="input"], [data-baseweb="select"] > div { min-height: 44px; }
+    </style>"""
+)
+
 
 # ---------- 저장소와 로그인 ----------
 

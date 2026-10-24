@@ -1,0 +1,6 @@
+[theme]
+# 기본 빨강(#FF4B4B)은 흰 글자와의 명도 대비가 3.3:1로 WCAG AA(4.5:1)에 못 미쳐 5.44:1인 색으로 바꿉니다.
+primaryColor = "#D60000"
+
+[browser]
+gatherUsageStats = false
