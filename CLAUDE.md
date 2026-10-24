@@ -70,6 +70,8 @@ python api_test/test_api.py image    # 이미지 인식만
 - 배포 앱: https://recipe4fridge-rmvcfl7qjnzc4tu6xs63kw.streamlit.app (Streamlit Community Cloud, 저장소 `nakyeong2026/recipe4fridge`의 `main`, 앱 파일 `src/app.py`)
 - `main`에 푸시하면 배포 앱에 자동으로 반영됩니다. 깃허브의 코드가 맞는데도 배포 앱만 ImportError 같은 오류를 내면, 대시보드의 ⋮ → Reboot app으로 다시 시작해 봅니다.
 - 배포 앱의 비밀 값은 대시보드의 Settings → Secrets에 있습니다. 최상위 키(`OPENROUTER_API_KEY`, `DATABASE_URL`)를 먼저 쓰고 `[auth]` 블록을 맨 뒤에 둡니다.
+- DB는 Supabase 프로젝트(서울 `ap-northeast-2`, Transaction pooler 6543)입니다. 데이터 API는 쓰지 않습니다(앱이 Postgres에 직접 연결).
+- 구글 로그인은 Google Cloud 프로젝트 `recipe4fridge`의 OAuth 클라이언트(웹 애플리케이션)를 씁니다. 동의 화면 대상이 "외부"이고 테스트 모드라서, Google 인증 플랫폼 → 대상 → 테스트 사용자에 등록한 계정만 로그인할 수 있습니다. 승인된 리디렉션 URI는 `http://localhost:8501/oauth2callback`과 배포 주소 + `/oauth2callback` 두 개입니다.
 - 배포 앱은 내장 브라우저에서 바깥 페이지 안의 iframe(같은 출처)으로 열리므로, 자동 조작은 `document.querySelector('iframe').contentDocument`에서 합니다. 시험 사진은 raw.githubusercontent.com에서 fetch해 업로드 칸에 넣을 수 있습니다.
 
 ## 실행 시 확인 사항
